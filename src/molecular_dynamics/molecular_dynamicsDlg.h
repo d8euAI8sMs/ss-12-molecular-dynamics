@@ -5,6 +5,11 @@
 #pragma once
 
 #include <util/common/gui/SimulationDialog.h>
+#include <util/common/gui/PlotControl.h>
+#include "afxwin.h"
+
+#include "model.h"
+#include "GridPlotControl.h"
 
 // CMolecularDynamicsDlg dialog
 class CMolecularDynamicsDlg : public CSimulationDialog
@@ -29,4 +34,22 @@ protected:
     afx_msg void OnPaint();
     afx_msg HCURSOR OnQueryDragIcon();
     DECLARE_MESSAGE_MAP()
+public:
+    virtual void OnSimulation();
+    CGridPlotControl m_gridCtrl;
+    CPlotControl m_energyCtrl;
+    model::model_data m_data;
+    afx_msg void OnBnClickedButton1();
+    afx_msg void OnBnClickedButton2();
+    CEdit m_initialEnergy;
+    CEdit m_vacancyEnergy;
+    BOOL m_withVacancy;
+    CButton m_radioEp;
+    CButton m_radioEk;
+    CButton m_radioEs;
+    CButton m_radioEd;
+    afx_msg void OnUpdateEnergyPlot();
+    BOOL m_bFreeBC;
+    BOOL m_bWipeEk;
+    BOOL m_bHardWipe;
 };
