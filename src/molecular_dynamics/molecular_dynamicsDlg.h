@@ -52,4 +52,5 @@ public:
     BOOL m_bFreeBC;
     BOOL m_bWipeEk;
     BOOL m_bHardWipe;
+    CEdit m_sumEnergyFluct;
 };

@@ -47,6 +47,7 @@ void CMolecularDynamicsDlg::DoDataExchange(CDataExchange* pDX)
     DDX_Check(pDX, IDC_CHECK2, m_bFreeBC);
     DDX_Check(pDX, IDC_CHECK3, m_bWipeEk);
     DDX_Check(pDX, IDC_CHECK4, m_bHardWipe);
+    DDX_Control(pDX, IDC_EDIT6, m_sumEnergyFluct);
 }
 
 BEGIN_MESSAGE_MAP(CMolecularDynamicsDlg, CSimulationDialog)
@@ -157,6 +158,9 @@ void CMolecularDynamicsDlg::OnSimulation()
     m_data.params->hardwipe = m_bHardWipe == TRUE;
 
     m_gridCtrl.RedrawWindow();
+
+    double es = 0;
+    size_t esi = 0;
     
     double e0 = s.penergy();
     if (m_withVacancy) e0 *= (s.all.size() - 1) / (double) s.all.size();
@@ -176,6 +180,16 @@ void CMolecularDynamicsDlg::OnSimulation()
         fmt.Format(TEXT("%lf"), std::abs(e2 - e0));
         m_vacancyEnergy.SetWindowText(fmt);
 
+        es += e2;
+        ++esi;
+        if (esi == 50)
+        {
+            fmt.Format(TEXT("%lf"), std::abs((es / esi - e0) / e0) * 100);
+            m_sumEnergyFluct.SetWindowText(fmt);
+            es = 0;
+            esi = 0;
+        }
+
         double e3 = s.kenergy();
 
         m_data.penergy_data.data->push_back({ t, e2 });
@@ -189,6 +203,12 @@ void CMolecularDynamicsDlg::OnSimulation()
 
         e1 = e2;
         t += m_data.params->dt;
+    }
+
+    if (esi != 0)
+    {
+        fmt.Format(TEXT("%lf"), std::abs((es / esi - e0) / e0) * 100);
+        m_sumEnergyFluct.SetWindowText(fmt);
     }
 
     CSimulationDialog::OnSimulation();
