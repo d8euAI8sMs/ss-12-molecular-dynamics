@@ -197,7 +197,7 @@ namespace model
 
                 double e0 = 0;
 
-                e0 += f_ij(r_ai);
+                e0 += f_ij(r_ai) / 2;
                 
                 for (size_t j = 0; j < i; ++j)
                 {
@@ -209,9 +209,9 @@ namespace model
                     double s_iaj = - (v_ai * v_ja);
                     double s_aij = - (v_ai * v_ij);
                     double s_ija = - (v_ij * v_ja);
-                    e0 += h_ijk(r_ai, r_aj, s_iaj / r_ai / r_aj) +
-                          h_ijk(r_ai, r_ij, s_aij / r_ai / r_ij) +
-                          h_ijk(r_ij, r_aj, s_ija / r_ij / r_aj);
+                    e0 += (h_ijk(r_ai, r_aj, s_iaj / r_ai / r_aj) +
+                           h_ijk(r_ai, r_ij, s_aij / r_ai / r_ij) +
+                           h_ijk(r_ij, r_aj, s_ija / r_ij / r_aj)) / 3;
                 }
 
                 e += e0;
@@ -229,7 +229,7 @@ namespace model
             {
                 e += stillinger_weber_potential(i, all[i].x);
             }
-            return e / 2;
+            return e;
         }
 
         double kenergy()
