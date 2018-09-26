@@ -20,15 +20,13 @@ namespace model
 
     namespace consts
     {
-        static const double eps    = 2.17;
-        static const double alpha  = 2.59;
-        static const double rho0   = 1.12;
-        static const double rho1   = 1.8;
-        static const double lambda = 21.0;
-        static const double gamma  = 1.20;
-        static const double A      = 7.05;
-        static const double B      = 0.602;
-        static const double m      = 28.086;
+        static const double m     = 28.086;
+        static const double H0    = 4.67;
+        static const double alpha = 0.543;
+        static const double rho0  = 0.235;
+        static const double b     = 0.0956;
+        static const double d     = 0.0239;
+        static const double c     = 0.192;
         static math::v3<> r[2][4] = {
             {
                 math::v3<>{  1, -1, -1 } * alpha / 2 / 2,
@@ -63,8 +61,8 @@ namespace model
             10,
 
             // other params
-            1e-1, consts::rho0 / 100, 1e-9,
-            false, true, false
+            1e-2, consts::rho0 / 100, 1e-9,
+            false, true, true
         };
         return p;
     }
@@ -95,14 +93,15 @@ namespace model
         std::vector < particle > all;
         std::vector < size_t > outer;
         std::vector < std::pair < size_t, size_t > > edges;
+        std::map < size_t, std::vector < size_t > > edge_neighbors;
         double radius;
-        bool skip_0 = false;
     public:
-        void init(const parameters & p)
+        void init(const parameters & p, bool skip_0)
         {
             all.clear();
             outer.clear();
             edges.clear();
+            edge_neighbors.clear();
             
             std::vector < std::pair < particle, size_t > > prev_layer;
             std::vector < std::pair < particle, size_t > > cur_layer;
@@ -159,65 +158,117 @@ namespace model
                 next_layer.clear();
             }
 
-            double thres2 = 1.5 * consts::rho1; thres2 *= thres2;
-
-            #pragma omp parallel for
-            for (int i = 0; i < all.size(); ++i)
-            for (int j = 0; j < i; ++j)
+            for (auto it = edges.begin(); it != edges.end();)
             {
-                if (i == j) continue;
-                if (math::sqnorm(all[i].x - all[j].x) < thres2)
+                if ((it->first == it->second) || skip_0 && (it->first == 0 || it->second == 0))
                 {
-                    #pragma omp critical
+                    it = edges.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+
+            if (skip_0)
+            {
+                edges.emplace_back(1, 2);
+                edges.emplace_back(3, 4);
+            }
+
+            for (int i = 0; i < edges.size(); ++i)
+            {
+                auto & e = edges[i];
+                all[e.first].neighbors.push_back(&all[e.second]);
+                all[e.second].neighbors.push_back(&all[e.first]);
+            }
+            
+            std::vector < std::pair < particle *, particle * > > coincidents;
+            for (size_t i = 0; i < edges.size(); ++i)
+            {
+                auto & e = edges[i];
+                auto & p1 = all[e.first];
+                auto & p2 = all[e.second];
+                coincidents.clear();
+                for (size_t j = 0; j < p1.neighbors.size(); ++j)
+                {
+                    if (p1.neighbors[j] != &p2)
                     {
-                        all[i].neighbors.push_back(&all[j]);
-                        all[j].neighbors.push_back(&all[i]);
+                        coincidents.emplace_back(p1.neighbors[j], &p1);
+                    }
+                }
+                for (size_t j = 0; j < p2.neighbors.size(); ++j)
+                {
+                    if (p2.neighbors[j] != &p1)
+                    {
+                        coincidents.emplace_back(p2.neighbors[j], &p2);
+                    }
+                }
+                for (size_t j = 0; j < coincidents.size(); ++j)
+                {
+                    auto & c = coincidents[j];
+                    size_t i1 = 0, i2 = 0;
+                    for (size_t k = 0; k < all.size(); ++k)
+                    {
+                        if (&all[k] == c.first) { i1 = k; }
+                        if (&all[k] == c.second) { i2 = k; }
+                    }
+                    for (size_t k = 0; k < edges.size(); ++k)
+                    {
+                        if (i1 == edges[k].first && i2 == edges[k].second ||
+                            i2 == edges[k].first && i1 == edges[k].second)
+                        {
+                            edge_neighbors[i].push_back(k);
+                            break;
+                        }
                     }
                 }
             }
 
-            radius = std::sqrt(radius) + consts::rho1;
+            radius = std::sqrt(radius);
         }
 
-        double stillinger_weber_potential(
-            size_t a, math::v3<> ax)
+        double vukcevic_potential(size_t a, size_t ae, math::v3<> ax)
         {
             double e = 0;
+
+            if (all[a].outer || all[edges[ae].first].outer || all[edges[ae].second].outer) return 0;
             
-            auto & ap = all[a];
+            math::v3<> c1, c2;
+            if (a == edges[ae].first) c1 = ax - all[edges[ae].second].x;
+            else                      c1 = all[edges[ae].first].x - ax;
+            double c1n2 = math::sqnorm(c1);
+            double c1n = std::sqrt(c1n2);
 
-            #pragma omp parallel for reduction(+:e)
-            for (int i = 0; i < ap.neighbors.size(); ++i)
+            for (size_t i = 0; i < edge_neighbors[ae].size(); ++i)
             {
-                auto & ip = *ap.neighbors[i];
-                if (skip_0 && (&all[0] == &ip)) continue;
-
-                auto v_ai = ip.x - ax;
-                double r_ai = math::norm(v_ai);
-
-                double e0 = 0;
-
-                e0 += f_ij(r_ai) / 2;
-                
-                for (size_t j = 0; j < i; ++j)
-                {
-                    auto & jp = *ap.neighbors[j];
-                    auto v_ij = jp.x - ip.x;
-                    auto v_ja = ax - jp.x;
-                    double r_aj = math::norm(v_ja);
-                    double r_ij = math::norm(v_ij);
-                    double s_iaj = - (v_ai * v_ja);
-                    double s_aij = - (v_ai * v_ij);
-                    double s_ija = - (v_ij * v_ja);
-                    e0 += (h_ijk(r_ai, r_aj, s_iaj / r_ai / r_aj) +
-                           h_ijk(r_ai, r_ij, s_aij / r_ai / r_ij) +
-                           h_ijk(r_ij, r_aj, s_ija / r_ij / r_aj)) / 3;
-                }
-
-                e += e0;
+                if (a == edges[edge_neighbors[ae][i]].first)
+                    c2 = ax - all[edges[edge_neighbors[ae][i]].second].x;
+                else if (a == edges[edge_neighbors[ae][i]].second)
+                    c2 = all[edges[edge_neighbors[ae][i]].first].x - ax;
+                else
+                    c2 = (all[edges[edge_neighbors[ae][i]].first].x - all[edges[edge_neighbors[ae][i]].second].x);
+                auto cos2 = (c1 * c2) / c1n2 / math::sqnorm(c2) * (c1 * c2);
+                e += std::exp(-(cos2 - 1/9.) * (cos2 - 1/9.) / consts::c);
             }
 
-            e *= consts::eps;
+            e /= edge_neighbors[ae].size();
+            e *= consts::H0 / 2 / (consts::b - consts::d);
+            e *= (consts::d * std::exp((consts::rho0 - c1n) / consts::d) - consts::b * std::exp((consts::rho0 - c1n) / consts::b));
+            e += consts::H0 / 2;
+
+            return e;
+        }
+
+        double vukcevic_potential(size_t a, math::v3<> ax)
+        {
+            double e = 0;
+
+            for (size_t j = 0; j < edges.size(); ++j)
+            {
+                if (edges[j].first == a || edges[j].second == a)
+                    e += vukcevic_potential(a, j, ax);
+            }
 
             return e;
         }
@@ -225,9 +276,20 @@ namespace model
         double penergy()
         {
             double e = 0;
-            for (size_t i = skip_0 ? 1 : 0; i < all.size(); ++i)
+            for (size_t i = 0; i < all.size(); ++i)
             {
-                e += stillinger_weber_potential(i, all[i].x);
+                e += vukcevic_potential(i, all[i].x);
+            }
+            return e;
+        }
+
+        double penergy_eq()
+        {
+            double e = 0;
+            for (size_t j = 0; j < edges.size(); ++j)
+            {
+                if (all[edges[j].first].outer || all[edges[j].second].outer) continue;
+                e -= consts::H0;
             }
             return e;
         }
@@ -235,35 +297,28 @@ namespace model
         double kenergy()
         {
             double e = 0;
-            for (size_t i = skip_0 ? 1 : 0; i < all.size(); ++i)
+            for (size_t i = 0; i < all.size(); ++i)
             {
                 e += math::sqnorm(all[i].v);
             }
             return consts::m * e / 2;
         }
 
-        double f_ij(double r_ij)
-        {
-            if (r_ij > consts::rho1) return 0;
-            return consts::A * (consts::B / r_ij / r_ij / r_ij / r_ij - 1) *
-                        std::exp(1 / (r_ij - consts::rho1));
-        }
-
-        double h_ijk(double r_ij, double r_ik, double cos_jik)
-        {
-            if (r_ij > consts::rho1) return 0;
-            if (r_ik > consts::rho1) return 0;
-            return consts::lambda * std::exp(consts::gamma / (r_ij - consts::rho1) +
-                                             consts::gamma / (r_ik - consts::rho1)) *
-                    (cos_jik + 1 / 3.) * (cos_jik + 1 / 3.);
-        }
-
         void next(const parameters & p)
         {
-            for (size_t i = skip_0 ? 1 : 0; i < all.size(); ++i)
+            for (size_t i = 0; i < all.size(); ++i)
             {
                 auto & a = all[i];
                 if (!p.freebc & a.outer) continue;
+                bool skip = false;
+                if (!p.freebc)
+                {
+                    for (size_t j = 0; j < a.neighbors.size(); ++j)
+                    {
+                        if (a.neighbors[j]->outer) { skip = true; break; }
+                    }
+                    if (skip) continue;
+                }
                 auto f0 = get_f(p, i);
                 a.x = a.x + a.v * p.dt + f0 / 2 / consts::m * p.dt * p.dt;
                 auto f1 = get_f(p, i);
@@ -273,7 +328,7 @@ namespace model
                     if (p.hardwipe)
                     {
                         #pragma omp parallel for
-                        for (int j = skip_0 ? 1 : 0; j < all.size(); ++j)
+                        for (int j = 0; j < all.size(); ++j)
                             all[j].v = {};
                     }
                     else
@@ -288,7 +343,7 @@ namespace model
         math::v3<> get_f(const parameters & p, size_t i)
         {
             auto & a = all[i];
-            auto U = [&] (const math::v3<> & d) { return stillinger_weber_potential(i, a.x + d); };
+            auto U = [&] (const math::v3<> & d) { return vukcevic_potential(i, a.x + d); };
             return {
                 - (U({ p.dx, 0, 0 }) - U({ -p.dx, 0, 0 })) / 2 / p.dx,
                 - (U({ 0, p.dx, 0 }) - U({ 0, -p.dx, 0 })) / 2 / p.dx,

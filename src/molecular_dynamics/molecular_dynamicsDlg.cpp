@@ -21,7 +21,7 @@
 CMolecularDynamicsDlg::CMolecularDynamicsDlg(CWnd* pParent /*=NULL*/)
     : CSimulationDialog(CMolecularDynamicsDlg::IDD, pParent)
     , m_data(model::make_model_data())
-    , m_withVacancy(m_data.system_data.skip_0)
+    , m_withVacancy(FALSE)
     , m_bFreeBC(m_data.params->freebc)
     , m_bWipeEk(m_data.params->wipeke)
     , m_bHardWipe(m_data.params->hardwipe)
@@ -150,9 +150,7 @@ void CMolecularDynamicsDlg::OnSimulation()
     CString fmt;
 
     auto & s = m_data.system_data;
-    s.skip_0 = false;
-    s.init(*m_data.params);
-    if (m_withVacancy) s.skip_0 = true;
+    s.init(*m_data.params, false);
     m_data.params->freebc = m_bFreeBC == TRUE;
     m_data.params->wipeke = m_bWipeEk == TRUE;
     m_data.params->hardwipe = m_bHardWipe == TRUE;
@@ -162,11 +160,14 @@ void CMolecularDynamicsDlg::OnSimulation()
     double es = 0;
     size_t esi = 0;
     
-    double e0 = s.penergy();
-    if (m_withVacancy) e0 *= (s.all.size() - 1) / (double) s.all.size();
+    double e0d = s.penergy();
+    double e0 = e0d + s.penergy_eq();
+    //if (m_withVacancy) e0 *= (s.all.size() - 1) / (double) s.all.size();
 
     fmt.Format(TEXT("%lf"), e0);
     m_initialEnergy.SetWindowText(fmt);
+
+    if (m_withVacancy) s.init(*m_data.params, true);
 
     double t = 0;
 
@@ -176,8 +177,9 @@ void CMolecularDynamicsDlg::OnSimulation()
     {
         s.next(*m_data.params);
         
-        double e2 = s.penergy();
-        fmt.Format(TEXT("%lf"), std::abs(e2 - e0));
+        double e2d = s.penergy();
+        double e2 = e2d + s.penergy_eq();
+        fmt.Format(TEXT("%lf"), std::abs(e2d));
         m_vacancyEnergy.SetWindowText(fmt);
 
         es += e2;
@@ -195,14 +197,16 @@ void CMolecularDynamicsDlg::OnSimulation()
         m_data.penergy_data.data->push_back({ t, e2 });
         m_data.kenergy_data.data->push_back({ t, e3 });
         m_data.senergy_data.data->push_back({ t, e3 + e2 });
-        m_data.denergy_data.data->push_back({ t, std::abs(e0 - e2) });
+        m_data.denergy_data.data->push_back({ t, e2d });
 
         OnUpdateEnergyPlot();
         
-        if (std::abs(e2 - e1) < m_data.params->eps) break;
+        if (std::abs(e2 - e0) < m_data.params->eps) break;
 
         e1 = e2;
         t += m_data.params->dt;
+
+        m_gridCtrl.RedrawWindow();
     }
 
     if (esi != 0)
